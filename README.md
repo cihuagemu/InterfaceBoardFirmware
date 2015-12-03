@@ -1,3 +1,6 @@
 # InterfaceBoardFirmware
 
-(c) SingleTact, 2015
+InterfaceBoardFirmware
+
+# License
+Standard MIT license applies. See [LICENSE.md](LICENSE.md) for details.
