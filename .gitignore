@@ -1,5 +1,7 @@
-target/
 *.LST
 *.OBJ
 *.#1
 *.out
+*.M51
+*.txt
+*.hex
