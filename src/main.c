@@ -7,6 +7,8 @@
 //                                                                             
 //-----------------------------------------------------------------------------
 
+//#define CALIBRATION
+
 #include "compiler_defs.h"
 #include "C8051F700_defs.h"
 #include "init.h"
@@ -31,13 +33,7 @@ const U8 CHANNEL_LIST[] = {16,17,18,19,20,21,22,23,36,37}; //Conversion to encod
 U8 code FlashCheck[3] _at_ FLASH_CHECK_ADDRESS;  //Just a check that the flash has been programmed
 U8 code SetupInfo[N_SETTINGS+1] _at_ FLASH_ADDR_SETUP;  //Our flash data
 
-U8 code CalFlashCheck[3] _at_ FLASH_ADDR_CAL_CHECK;  //Just a check that the flash has been programmed
-U8 code CalInfo1[SENSOR_CALIBRATION_DATA_LENGTH+1] _at_ FLASH_ADDR_CAL1;
-//U8 code CalSlope[10] _at_ FLASH_ADDR_CAL_SLOPE;  //Just a check that the flash has been programmed
-//U8 code CalOffset[10] _at_ FLASH_ADDR_CAL_OFFSET;  //Just a check that the flash has been programmed
 
-
-volatile U8 xdata CalibrationData[8];
 
 // Global holder for SMBus data.
 // All receive data is written here
@@ -64,10 +60,22 @@ bit LoadFlash();
 void SaveFlash();
 void SetUpCapSense();
 void PerformDACFunction();
+
+
+#ifdef CALIBRATION
+
+U8 code CalFlashCheck[3] _at_ FLASH_ADDR_CAL_CHECK;  //Just a check that the flash has been programmed
+U8 code CalInfo1[SENSOR_CALIBRATION_DATA_LENGTH+1] _at_ FLASH_ADDR_CAL1;
+//U8 code CalSlope[10] _at_ FLASH_ADDR_CAL_SLOPE;  //Just a check that the flash has been programmed
+//U8 code CalOffset[10] _at_ FLASH_ADDR_CAL_OFFSET;  //Just a check that the flash has been programmed
+volatile U8 xdata CalibrationData[8];
+
 void Cal_Init();
 void SaveCalibrationToFlash(U16 add_off, U8 packet_length);
 bit CheckCalFlash();
 void CalCalibrationTable(void);
+
+#endif
 
 
 // CapSense Controls
@@ -85,6 +93,7 @@ void CalCalibrationTable(void);
 //Chip select for analogue output
 sbit PinAnalogCS = P2^1;
 sbit PinDigitalOut = P2^4;
+
 
 
 //-----------------------------------------------------------------------------
@@ -172,16 +181,12 @@ void main (void)
 
    }
 
+IsCalibrated = 0;
+#ifdef CALIBRATION
    if ( CheckCalFlash() ) //Sensor has been calibrated
-   {
       // We have the calibration table stored
       IsCalibrated = 1;
-
-   }
-   else //
-   {
-      IsCalibrated = 0;
-   }
+#endif
 
    CapSense_Init(); 
 
@@ -201,7 +206,9 @@ void main (void)
    CapSenseClearInt();
    IsScanning = TRUE;
 
+#ifdef CALIBRATION
    Cal_Init();
+#endif
 
    // Main dispatch loop
    while (1)
@@ -464,6 +471,8 @@ void ProcessCommand()
 
       break;
 
+  #ifdef CALIBRATION
+
    // Write the Calibration data into the Flash
    case CMD_WRITE_CAL:   // 0x04
       
@@ -488,6 +497,7 @@ void ProcessCommand()
       ResetMcu();
 
       break;
+	  #endif
 
    default:
       processCommandFast();
@@ -665,6 +675,22 @@ void SMBus_ISR (void) interrupt 7
 }
 
 
+U32 processBaseline(U16 baseline, U16 tempScaling, U16 C_result)
+{
+	U32 toReturn;;
+
+	  toReturn = (tempScaling << 8)/100 + C_result; 
+
+	  if(toReturn > baseline )
+      	toReturn = (((toReturn - baseline) * 100)/ tempScaling) - 0xFF;
+	  else
+	  	toReturn = 0;
+
+	return toReturn;
+
+}
+
+
 
 //-----------------------------------------------------------------------------
 // CS0 Interrupt Service Routine (ISR)
@@ -679,7 +705,9 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
    UU32 temp;
    U16 tempScaling;
 
+#ifdef CALIBRATION
    UU16 calTemp;
+#endif
    
    // Disable interrupts so we don't deal with IO while we're
    // processing the new data
@@ -694,12 +722,10 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
       baseline.U16 = 0;
       tempScaling = 100;
 
-      temp.U32 = (tempScaling << 8)/100 + CS0D; 
-      temp.U32 -= baseline.U16;
-      temp.U32 = (temp.U32 *100)/ tempScaling - 0xFF;
+      temp.U32 = processBaseline(baseline.U16, 100, CS0D);
 
-      MainRegister[SET_BASELINE0] = temp.U8[2];
-      MainRegister[SET_BASELINE0b] = temp.U8[3];      
+	  MainRegister[SET_BASELINE0] = temp.U8[2];
+      MainRegister[SET_BASELINE0b] = temp.U8[3]; 
 
       IsBaselineSettled = 1;
       
@@ -709,22 +735,16 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
    baseline.U16 = (temp.U32 <<8) + MainRegister[SET_BASELINE0b+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
    tempScaling = (MainRegister[SET_SCALINGANALOGUEOUTMSB]<<8) + MainRegister[SET_SCALINGANALOGUEOUTLSB]; 
    
+   tempScaling = (tempScaling < 1 ? 1: tempScaling); //We don't want a divide by zero error
+
    SensorRawBuffer[0] = FrameCounter.U8[0];
    SensorRawBuffer[1] = FrameCounter.U8[1];
    SensorRawBuffer[2] = PCA0L;
    SensorRawBuffer[3] = PCA0H;
 
-   if(tempScaling < 1) //We don't want a divide by zero error
-      tempScaling = 1;
+   temp.U32 = processBaseline(baseline.U16, tempScaling, CS0D);
 
-   temp.U32 = tempScaling;
-   temp.U32 = (temp.U32 << 8)/100; //(Add 255)
-   temp.U32 += CS0D;
 
-   if(temp.U32 > (baseline.U16 ))
-   {
-      temp.U32 -= baseline.U16;
-      temp.U32 = (temp.U32 *100)/ tempScaling;
 
       #ifdef CALIBRATION
 
@@ -753,12 +773,6 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
          SensorRawBuffer[ChannelIndex*2 + 5] = temp.U8[3];
 
       #endif
-   }
-   else
-   {
-      SensorRawBuffer[ChannelIndex*2 + 4] = 0x00; //Just send 0x00 to signify that we are out of range
-      SensorRawBuffer[ChannelIndex*2 + 5] = 0x00;
-   }
 
 
    ChannelIndex++;
@@ -798,79 +812,6 @@ void SetUpCapSense()
    CapSenseStart();
 }
 
-//-----------------------------------------------------------------------------
-// Get Calibrated Data
-//-----------------------------------------------------------------------------
-//
-//
-//-----------------------------------------------------------------------------
-
-
-/*
-void CalCalibrationTable()
-{
-   
-   writeLocation = SmbBufferIn[1];
-   packetLength = SmbBufferIn[2];
-
-   if(SmbBufferIn[packetLength+3] != 0xFF) //Truncated packet
-   {
-      SmbBufferIn[packetLength+3] = 0;  //Clear the flag
-      return;
-   }
-
-   SmbBufferIn[packetLength+3] = 0;   //Clear the flag
-
-   U8 i;
-   U16 iBuffer;
-   UU32 temp;
-
-   for(i = 0; i < 2; i++)
-   {
-      for(iBuffer = 0; iBuffer < 128; iBuffer++)
-      {
-         //temp.U32 = 256 - (256 - i * 128 - iBuffer) * FLASH_ADDR_CAL_SLOPE[0] / 100 + FLASH_ADDR_CAL_OFFSET[0]; 
-         temp.U32 = (CalSlope[0] << 4 + CalSlope[1]);
-         temp.U32 = temp.U32 * (256 - i * 128 - iBuffer) / 100;
-         temp.U32 = 256 - temp.U32;
-         //temp.U32 = (256 - i * 128 - iBuffer) * (FLASH_ADDR_CAL_SLOPE[0] << 4 + FLASH_ADDR_CAL_SLOPE[1]) / 100; 
-         
-         MainRegister[SET_SMBUSADDRESS + i * 256 + iBuffer * 2] = temp.U8[2];
-         MainRegister[SET_SMBUSADDRESS + i * 256 + iBuffer * 2 + 1] = temp.U8[3];
-         //MainRegister[SET_SMBUSADDRESS + iBuffer] = SmbBufferIn[iBuffer+3];
-         //SaveCalibrationToFlash(writeLocation << 4, packetLength);
-      }
-
-   }
-
-   for(i = 0; i < 4; i++)
-   {
-      for(iBuffer = 0; iBuffer < CalPoint[i]; iBuffer++)
-      {
-         //temp.U32 = 256 - (256 - i * 128 - iBuffer) * FLASH_ADDR_CAL_SLOPE[0] / 100 + FLASH_ADDR_CAL_OFFSET[0]; 
-         temp.U32 = (CalSlope[0] << 4 + CalSlope[1]);
-         temp.U32 = temp.U32 * (i * 128 + iBuffer - 256) / 100;
-         temp.U32 = 256 - temp.U32;
-         temp.U32 = temp.U32 - (CalOffset[1] << 4)
-         //temp.U32 = (256 - i * 128 - iBuffer) * (FLASH_ADDR_CAL_SLOPE[0] << 4 + FLASH_ADDR_CAL_SLOPE[1]) / 100; 
-      
-         MainRegister[SET_SMBUSADDRESS + i * 256 + iBuffer * 2] = temp.U8[2];
-         MainRegister[SET_SMBUSADDRESS + i * 256 + iBuffer * 2 + 1] = temp.U8[3];
-         //MainRegister[SET_SMBUSADDRESS + iBuffer] = SmbBufferIn[iBuffer+3];
-         //SaveCalibrationToFlash(writeLocation << 4, packetLength);
-
-         FLASH_Write( (FLADDR)(&CalInfo1[0]) + add_off, 
-         (U8 xdata *)(&MainRegister[SET_SENSOR6]), 
-         packet_length);
-       }
-   }
-
-}
-
-   
-   ResetMcu();
-}
-*/
 
 //-----------------------------------------------------------------------------
 // 
@@ -900,30 +841,6 @@ bit LoadFlash(void)
    }
 }
 
-//-----------------------------------------------------------------------------
-// 
-//-----------------------------------------------------------------------------
-//
-//
-//-----------------------------------------------------------------------------
-bit CheckCalFlash(void)
-{
-   U8 i, index;
-
-   // First copy our existing calibration table into scratch space
-   index = 0;
-
-
-   if(CalFlashCheck[0] == 0xFF && CalFlashCheck[1] == 0xFE && CalFlashCheck[2] == 0xFD)
-   {
-      
-      return TRUE;
-   }
-   else
-   {
-      return FALSE;
-   }
-}
 
 //-----------------------------------------------------------------------------
 // 
@@ -958,6 +875,7 @@ void SaveFlash(void)
 //
 //
 //-----------------------------------------------------------------------------
+#ifdef CALIBRATION
 void SaveCalibrationToFlash(U16 add_off, U8 packet_length)
 {
    
@@ -999,4 +917,30 @@ void Cal_Init(void)
      
    
 }
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
+//
+//
+//-----------------------------------------------------------------------------
+bit CheckCalFlash(void)
+{
+   U8 i, index;
+
+   // First copy our existing calibration table into scratch space
+   index = 0;
+
+
+   if(CalFlashCheck[0] == 0xFF && CalFlashCheck[1] == 0xFE && CalFlashCheck[2] == 0xFD)
+   {
+      
+      return TRUE;
+   }
+   else
+   {
+      return FALSE;
+   }
+}
+#endif
 
