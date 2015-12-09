@@ -624,7 +624,7 @@ U32 processBaseline(U16 baseline, U16 tempScaling, U16 C_result)
 
   if(toReturn > baseline )
   {
-    toReturn = (((toReturn - baseline) * 100)/ tempScaling) - 0xFF;
+    toReturn = (((toReturn - baseline) * 100)/ tempScaling) - 0x0000FFFF;
   }
   else
   {
