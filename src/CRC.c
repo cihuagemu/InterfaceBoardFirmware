@@ -1,8 +1,14 @@
+//-----------------------------------------------------------------------------
+//  Copyright (c) 2015 Pressure Profile Systems
+//
+//  Licensed under the MIT license. This file may not be copied, modified, or
+//  distributed except according to those terms.
+//-----------------------------------------------------------------------------
+
 #include "main.h"
 
 U16 UpdateCRC (U16 CRC_acc, U8 CRC_input)
 {
-
 	U8 i;                    // loop counter
 	#define POLY 0x1021
 	// Create the CRC "dividend" for polynomial arithmetic (binary arithmetic
@@ -26,8 +32,6 @@ U16 UpdateCRC (U16 CRC_acc, U8 CRC_input)
 			// if not, just shift the CRC value
 			CRC_acc = CRC_acc << 1;
 		}
-
 	}
 	return CRC_acc; // Return the final remainder (CRC value)
-
 }

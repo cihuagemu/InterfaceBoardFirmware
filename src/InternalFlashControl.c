@@ -1,3 +1,10 @@
+//-----------------------------------------------------------------------------
+//  Copyright (c) 2015 Pressure Profile Systems
+//
+//  Licensed under the MIT license. This file may not be copied, modified, or
+//  distributed except according to those terms.
+//-----------------------------------------------------------------------------
+
 #include "compiler_defs.h"
 #include "C8051F700_defs.h"
 #include "main.h"
@@ -14,102 +21,94 @@ U8 code RecordingDescriptors[129] _at_ FLASH_DESCRIPTOR_TABLE; //Our descriptor 
 
 bool_t loadFlashSettings(void)
 {
-   U8 i, index;
+  U8 i, index;
+  index = 0;
 
-   index = 0;
-      
+  //Check that our flash header is ok
+  if(FlashCheckSettings[0] == 0xFF && FlashCheckSettings[1] == 0xFE && FlashCheckSettings[2] == 0xFD)
+  {
+    // And now all of our other setup stuff
+    for (i = 0; i < nSettings; ++i)
+    {
+      MainRegister[i] = SetupInfo[i];
+    }
 
-	//Check that our flash header is ok
-	if(FlashCheckSettings[0] == 0xFF && FlashCheckSettings[1] == 0xFE && FlashCheckSettings[2] == 0xFD)
-	{
-	   // And now all of our other setup stuff
-	   for (i = 0; i < nSettings; ++i)
-	   {
-	      MainRegister[i] = SetupInfo[i];
-	   }
-
-	   return TRUE;
-   }
-   else
-   {
-		return FALSE;
-   }
+    return TRUE;
+  }
+  else
+  {
+    return FALSE;
+  }
 }
-
 
 bool_t loadFlashDescTable(void)
 {
-   U8 i, index;
+  U8 i, index;
+  index = 0;
 
-   index = 0;
-      
+  //Check that our flash header is ok
+  if(FlashCheckDesc[0] == 0xFF && FlashCheckDesc[1] == 0xFE && FlashCheckDesc[2] == 0xFD)
+  {
+    // And now all of our other setup stuff
+    for (i = 0; i < 128; ++i)
+    {
+      MainRegister[i+SENSOR_MICRON_BUFFER_LOCATION] = RecordingDescriptors[i];
+    }
 
-	//Check that our flash header is ok
-	if(FlashCheckDesc[0] == 0xFF && FlashCheckDesc[1] == 0xFE && FlashCheckDesc[2] == 0xFD)
-	{
-	   // And now all of our other setup stuff
-	   for (i = 0; i < 128; ++i)
-	   {
-	      MainRegister[i+SENSOR_MICRON_BUFFER_LOCATION] = RecordingDescriptors[i];
-	   }
-
-	   return TRUE;
-   }
-   else
-   {
-		return FALSE;
-   }
+    return TRUE;
+  }
+  else
+  {
+    return FALSE;
+  }
 }
-
-
 
 void saveSettingsToFlash(void)
 {
+  U8 FlashCheckWrite[3] = {0xFF,0xFE,0xFD};
 
-	U8 FlashCheckWrite[3] = {0xFF,0xFE,0xFD};
+  // Erase our configuration Flash page
+  FLASH_PageErase( (FLADDR)(&FlashCheckSettings[0]) );
 
-   // Erase our configuration Flash page
-   FLASH_PageErase( (FLADDR)(&FlashCheckSettings[0]) );
+  // And copy our updated data into it
+  FLASH_Write(
+    (FLADDR)(&FlashCheckSettings[0]),
+    (U8 *)(&FlashCheckWrite[0]),
+    3
+  );
 
-
-   // And copy our updated data into it
-   FLASH_Write( (FLADDR)(&FlashCheckSettings[0]), 
-                (U8 *)(&FlashCheckWrite[0]), 
-                3);
-
-   // And copy our updated data into it
-   FLASH_Write( (FLADDR)(&SetupInfo[0]), 
-                (U8 xdata *)(&MainRegister[0]), 
-                nSettings);
-
+  // And copy our updated data into it
+  FLASH_Write(
+    (FLADDR)(&SetupInfo[0]),
+    (U8 xdata *)(&MainRegister[0]),
+    nSettings
+  );
 }
 
 
 void saveDescriptorsToFlash(void)
 {
+  U8 FlashCheckWrite[3] = {0xFF,0xFE,0xFD};
 
-	U8 FlashCheckWrite[3] = {0xFF,0xFE,0xFD};
+  // Erase our configuration Flash page
+  FLASH_PageErase( (FLADDR)(&FlashCheckDesc[0]) );
 
-   // Erase our configuration Flash page
-   FLASH_PageErase( (FLADDR)(&FlashCheckDesc[0]) );
+  // And copy our updated data into it
+  FLASH_Write(
+    (FLADDR)(&FlashCheckDesc[0]),
+    (U8 *)(&FlashCheckWrite[0]),
+    3
+  );
 
-
-   // And copy our updated data into it
-   FLASH_Write( (FLADDR)(&FlashCheckDesc[0]), 
-                (U8 *)(&FlashCheckWrite[0]), 
-                3);
-
-   // And copy our updated data into it
-   FLASH_Write( (FLADDR)(&RecordingDescriptors[0]), 
-                (U8 xdata *)(&MainRegister[SENSOR_MICRON_BUFFER_LOCATION]), 
-                128);
-
+  // And copy our updated data into it
+  FLASH_Write(
+    (FLADDR)(&RecordingDescriptors[0]),
+    (U8 xdata *)(&MainRegister[SENSOR_MICRON_BUFFER_LOCATION]),
+    128
+  );
 }
-
 
 void EraseFlashDescriptors(void)
 {
-   FLASH_PageErase( (FLADDR)(&FlashCheckDesc[0]) );
+  FLASH_PageErase( (FLADDR)(&FlashCheckDesc[0]) );
 }
-
-

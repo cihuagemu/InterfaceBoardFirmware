@@ -1,3 +1,10 @@
+//-----------------------------------------------------------------------------
+//  Copyright (c) 2015 Pressure Profile Systems
+//
+//  Licensed under the MIT license. This file may not be copied, modified, or
+//  distributed except according to those terms.
+//-----------------------------------------------------------------------------
+
 #ifndef CALIBRATION_H
 #define CALIBRATION_H
 
@@ -7,11 +14,7 @@
 #define CALIBRATION
 
 extern U16 code calibrationValues[1024];
-extern U16 code  calibrationScaling;
+extern U16 code calibrationScaling;
 extern U16 code calibrationBaseline;
 
-
-
-
-
-#endif
+#endif /* CALIBRATION_H */

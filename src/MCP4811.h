@@ -1,6 +1,13 @@
+//-----------------------------------------------------------------------------
+//  Copyright (c) 2015 Pressure Profile Systems
+//
+//  Licensed under the MIT license. This file may not be copied, modified, or
+//  distributed except according to those terms.
+//-----------------------------------------------------------------------------
+
 #ifndef MCP4811_def
 #define MCP4811_def
-      
+
 #include "compiler_defs.h"
 #include "C8051F700_defs.h"
 #include "types.h"
@@ -13,7 +20,6 @@ extern U8 Micron_ReadFlashBuffer();
 extern U8 Micron_EraseDevice();
 extern void Micron_SetAddress(U32 CurrentAddress);
 
-extern U8 xdata MainRegister[MAIN_REGISTER_LENGTH];  
+extern U8 xdata MainRegister[MAIN_REGISTER_LENGTH];
 
-
-#endif
+#endif /* MCP4811_def */
