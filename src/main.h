@@ -23,9 +23,9 @@
 #define PARAMSLOCATION 112
 #define SENSOR_DATA_LOCATION 128
 #define MAIN_REGISTER_LENGTH 192
-#define SENSOR_CALIBRATION_DATA_LENGTH 512
 
 #define FLASH_CHECK_ADDRESS      0x3000
+
 #define FLASH_ADDR_SETUP         0x3003
 
 extern volatile U8 xdata MainRegister[MAIN_REGISTER_LENGTH];
@@ -51,17 +51,6 @@ extern U8 SmbAddress;
 #define SLAVE_ADDR_DEF        4
 #define SERIAL_NUM_DEF        0x3333
 
-#ifdef CALIBRATION
-
-#define FLASH_ADDR_CAL_CHECK      0x2000
-#define FLASH_ADDR_CAL_SLOPE      0x2010
-#define FLASH_ADDR_CAL_OFFSET     0x2020
-#define FLASH_ADDR_CAL1           0x2200
-#define FLASH_ADDR_CAL2           0x2400
-#define FLASH_ADDR_CAL3           0x2600
-#define FLASH_ADDR_CAL4           0x2800
-
-#endif
 
 // SMBus status vector - top 4 bits only
 #define  SMB_SRADD            0x20           // (SR) slave address received

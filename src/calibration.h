@@ -13,8 +13,29 @@
 
 #define CALIBRATION
 
-extern U16 code calibrationValues[1024];
-extern U16 code calibrationScaling;
-extern U16 code calibrationBaseline;
+#define TRUE 1
+#define FALSE 0
+
+#define SENSOR_CALIBRATION_DATA_LENGTH 512
+
+
+#define FLASH_ADDR_CAL_CHECK      0x2000
+#define FLASH_ADDR_CAL_SLOPE      0x2010
+#define FLASH_ADDR_CAL_OFFSET     0x2020
+#define FLASH_ADDR_CAL1           0x2200
+#define FLASH_ADDR_CAL2           0x2400
+#define FLASH_ADDR_CAL3           0x2600
+#define FLASH_ADDR_CAL4           0x2800
+
+
+extern void Cal_Init();
+extern void SaveCalibrationToFlash(U16 add_off, U8 xdata * writeAddress, U8 packet_length);
+extern bit CheckCalFlash();
+extern void CalCalibrationTable(void);
+
+extern U8* code CalInfo1;
+extern volatile U8 xdata CalibrationData[8];
+
 
 #endif /* CALIBRATION_H */
+

@@ -55,20 +55,6 @@ void SaveFlash();
 void SetUpCapSense();
 void PerformDACFunction();
 
-#ifdef CALIBRATION
-
-U8 code CalFlashCheck[3] _at_ FLASH_ADDR_CAL_CHECK;  //Just a check that the flash has been programmed
-U8 code CalInfo1[SENSOR_CALIBRATION_DATA_LENGTH+1] _at_ FLASH_ADDR_CAL1;
-//U8 code CalSlope[10] _at_ FLASH_ADDR_CAL_SLOPE;  //Just a check that the flash has been programmed
-//U8 code CalOffset[10] _at_ FLASH_ADDR_CAL_OFFSET;  //Just a check that the flash has been programmed
-volatile U8 xdata CalibrationData[8];
-
-void Cal_Init();
-void SaveCalibrationToFlash(U16 add_off, U8 packet_length);
-bit CheckCalFlash();
-void CalCalibrationTable(void);
-
-#endif
 
 // CapSense Controls
 #define CapSenseStart()       (CS0CN |= 0x10)
@@ -164,17 +150,7 @@ void main (void)
     MainRegister[N_SETTINGS] = 0xFF;
   }
 
-  IsCalibrated = 0;
-
-  #ifdef CALIBRATION
-
-  if ( CheckCalFlash() ) //Sensor has been calibrated
-  {
-    // We have the calibration table stored
-    IsCalibrated = 1;
-  }
-
-  #endif
+  
 
   CapSense_Init();
 
@@ -193,10 +169,15 @@ void main (void)
   CapSenseClearInt();
   IsScanning = TRUE;
 
+  IsCalibrated = 0;
   #ifdef CALIBRATION
+  if ( CheckCalFlash() ) //Sensor has been calibrated
+  {
+    // We have the calibration table stored
+    IsCalibrated = 1;
+  }
 
   Cal_Init();
-
   #endif
 
   // Main dispatch loop
@@ -448,7 +429,7 @@ void ProcessCommand()
         MainRegister[SET_SENSOR6 + iBuffer] = SmbBufferIn[iBuffer+3];
       }
 
-      SaveCalibrationToFlash(writeLocation << 4, packetLength);
+      SaveCalibrationToFlash(writeLocation << 4, (U8 xdata *)(&MainRegister[SET_SENSOR6]), packetLength);
       ResetMcu();
       break;
 
@@ -755,13 +736,12 @@ void SetUpCapSense()
 //
 //-----------------------------------------------------------------------------
 //
-//
+// Load settings from flash
 //-----------------------------------------------------------------------------
 bit LoadFlash(void)
 {
   U8 i, index;
 
-  // First copy our existing calibration table into scratch space
   index = 0;
 
   if(FlashCheck[0] == 0xFF && FlashCheck[1] == 0xFE && FlashCheck[2] == 0xFD)
@@ -784,7 +764,7 @@ bit LoadFlash(void)
 //
 //-----------------------------------------------------------------------------
 //
-//
+// Save settings to flash
 //-----------------------------------------------------------------------------
 void SaveFlash(void)
 {
@@ -808,76 +788,3 @@ void SaveFlash(void)
   );
 }
 
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-//
-//
-//-----------------------------------------------------------------------------
-#ifdef CALIBRATION
-
-void SaveCalibrationToFlash(U16 add_off, U8 packet_length)
-{
-  U8 flashCheckWrite[3] = {0xFF,0xFE,0xFD};
-
-  // Erase our configuration Flash page
-  // And copy our updated data into it
-
-  if(add_off == 0)
-  {
-    // Erase our configuration Flash page
-    FLASH_PageErase( (FLADDR)(&CalInfo1[0]) );
-    FLASH_PageErase( (FLADDR)(&CalInfo1[0] + 512) );
-    FLASH_PageErase( (FLADDR)(&CalInfo1[0] + 1024 ));
-    FLASH_PageErase( (FLADDR)(&CalInfo1[0] + 1536) );
-    // And copy our updated data into it
-    FLASH_Write(
-      (FLADDR)(&CalFlashCheck[0]),
-      (U8 *)(&flashCheckWrite[0]),
-      3
-    );
-  }
-
-  FLASH_Write(
-    (FLADDR)(&CalInfo1[0]) + add_off,
-    (U8 xdata *)(&MainRegister[SET_SENSOR6]),
-    packet_length
-  );
-}
-
-void Cal_Init(void)
-{
-  U8 i;
-  /*
-  for(i = 0; i < 8; i++)
-  {
-    CalibrationData[i] = i;
-  }*/
-
-  U8 flashCheckWrite[3] = {0xFF,0xFE,0xFD};
-}
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-//
-//
-//-----------------------------------------------------------------------------
-bit CheckCalFlash(void)
-{
-  U8 i, index;
-
-  // First copy our existing calibration table into scratch space
-  index = 0;
-
-  if(CalFlashCheck[0] == 0xFF && CalFlashCheck[1] == 0xFE && CalFlashCheck[2] == 0xFD)
-  {
-    return TRUE;
-  }
-  else
-  {
-    return FALSE;
-  }
-}
-
-#endif
