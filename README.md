@@ -12,7 +12,13 @@ git clone git@github.com:SingleTact/InterfaceBoardFirmware.git
 ```
 
 ## Building...
-TODO Need to fill in...
+Programming the C8051F717 requires an 8 bit programmer which can be purchased from Digikey (336-1182-ND).
+
+Programming requires the Silicon Labs IDE and free Keil compiler which can be downloaded from: http://www.silabs.com/products/mcu/Pages/8-bit-microcontroller-software.aspx
+
+The source code for calibration is too large for the free Keil license.   To include this code, include "calibration.h" and make sure "calibration.c" is added to the build list.
+
+More information can be found in the SingeTact Manual
 
 # Found a bug?
 If you have been so lucky to discover a bug, or would like to suggest a
