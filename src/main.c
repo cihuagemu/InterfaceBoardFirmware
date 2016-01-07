@@ -13,18 +13,20 @@
 #include "main.h"
 #include "F700_FlashUtils.h"
 #include "MCP4811.h"
-//#include "calibration.h"
+#include "calibration.h"
 
 U8 SmbAddress;
 volatile U8 SmbState = SMB_IDLE;
 bit IsScanReady = 0;
 bit IsScanning;
 UU16 FrameCounter;
-//volatile U8 data MedianFrame;
-//volatile U32 xdata MedianData[3];
+
 volatile U8 ChannelIndex = 0; //Index of the channel we are scanning
 volatile bit IsBaselineSettled = 0;
 volatile bit IsCalibrated = 0;
+volatile bit IsSensorSizeDetected = 0;
+volatile bit IsStartup = 0;
+volatile bit IsFirstFrame = 0;
 
 const U8 CHANNEL_LIST[] = {16,17,18,19,20,21,22,23,36,37}; //Conversion to encoding on datasheet pg 97
 
@@ -150,11 +152,24 @@ void main (void)
     MainRegister[N_SETTINGS] = 0xFF;
   }
 
-  
-
   CapSense_Init();
 
+  //#ifdef CALIBRATION
+  if ( CheckCalFlash() ) //Sensor has been calibrated
+  {
+    // We have the calibration table stored, and prevent potential writing to flash
+    IsCalibrated = 1;
+    MainRegister[SET_RESERVED] = 1;
+  }
+  else //
+  {
+      IsCalibrated = 0;
+  }
+  
+  //#endif
+
   IsBaselineSettled = 0;
+  IsStartup = 0;
 
   // Enable the SMBus interrupt
   EIE1 |= 0x01;
@@ -169,16 +184,7 @@ void main (void)
   CapSenseClearInt();
   IsScanning = TRUE;
 
-  IsCalibrated = 0;
-  #ifdef CALIBRATION
-  if ( CheckCalFlash() ) //Sensor has been calibrated
-  {
-    // We have the calibration table stored
-    IsCalibrated = 1;
-  }
-
-  Cal_Init();
-  #endif
+  
 
   // Main dispatch loop
   while (1)
@@ -199,6 +205,13 @@ void main (void)
       case SMB_SENT:
         SmbReadLocation = SENSOR_DATA_LOCATION; //Reset SMBus read itr
         SmbState = SMB_IDLE;
+
+        if(!IsFirstFrame)
+        {
+            IsBaselineSettled = 0;
+            IsFirstFrame = 1;
+        }
+
         break;
 
       case SMB_ERROR:
@@ -235,50 +248,7 @@ void main (void)
             SensorRawBuffer[2*i+4] = newValue.U8[2];
             SensorRawBuffer[2*i+5] = newValue.U8[3];
 
-            //MainRegister[SENSOR_DATA_LOCATION+i+4] = SensorRawBuffer[2*i+4];
-            //MainRegister[SENSOR_DATA_LOCATION+i+5] = SensorRawBuffer[2*i+5];
-
-            /*
-            MedianData[MedianFrame] = (SensorRawBuffer[2*i+4]<<8) + SensorRawBuffer[2*i+5];
-            a = MedianData[0];
-            b = MedianData[1];
-            c = MedianData[2];
-
-            if (a > b)
-            {
-              // Order is either bac, bca, or cba
-              if (a > c)
-              {
-                // Order is either bca or cba
-                newValue.U32 = Max(b, c);
-              }
-              else
-              {
-                // Order is bac
-                newValue.U32 = a;
-              }
-            }
-            else
-            {
-              // Order is either abc, acb, or cab
-              if (b > c)
-              {
-                // Order is either acb or cab
-                newValue.U32 = Max(a, c);
-              }
-              else
-              {
-                // Order is abc
-                newValue.U32 = b;
-              }
-            }
-
-            MedianFrame = (MedianFrame + 1) % 3;
-            newValue.U32 = newValue.U32 * 50 + (MainRegister[SENSOR_DATA_LOCATION+i+4]<<8) + MainRegister[SENSOR_DATA_LOCATION+i+5] * 50;
-            newValue.U32 = newValue.U32 /100;
-
-            MainRegister[SENSOR_DATA_LOCATION+i+4] = newValue.U8[2];
-            MainRegister[SENSOR_DATA_LOCATION+i+5] = newValue.U8[3];*/
+            
           }
 
           PerformDACFunction();
@@ -322,6 +292,8 @@ void PerformDACFunction()
   analogueValue.U8[0] = SensorRawBuffer[sensorIndex*2 + SET_SENSOR0];
   analogueValue.U8[1] = SensorRawBuffer[sensorIndex*2 + SET_SENSOR0b];
 
+  analogueValue.U16 = (analogueValue.U16 < 1024 ? analogueValue.U16 : 1024);
+
   //Format data in the right format for the DAC chip (setting DAC enabled, gain = 1x)
   dacOut = (analogueValue.U16 << 2) | 0x3000; //  /GA = 1 | /SHDN = 1 = 0x3xxx;
 
@@ -338,6 +310,17 @@ void PerformDACFunction()
   while ((SPI0CFG & 0x80)); //Wait for write to complete
 
   PinAnalogCS = 1; //CS high
+
+  // Wait 100 convertions and we tare our baseline after we startup
+   if(!IsStartup && MainRegister[SET_BASELINE23] > 100)
+   {
+      IsBaselineSettled = 0;
+      IsStartup = 1;
+   } else
+   {
+      MainRegister[SET_BASELINE23]++;
+   }
+
 }
 
 //-----------------------------------------------------------------------------
@@ -418,18 +401,21 @@ void ProcessCommand()
 
       if(SmbBufferIn[packetLength+3] != 0xFF) //Truncated packet
       {
-        SmbBufferIn[packetLength+3] = 0;  //Clear the flag
-        return;
+         SmbBufferIn[packetLength+3] = 0;  //Clear the flag
+         return;
       }
 
       SmbBufferIn[packetLength+3] = 0;   //Clear the flag
 
       for(iBuffer = 0; iBuffer < packetLength; iBuffer++)
       {
-        MainRegister[SET_SENSOR6 + iBuffer] = SmbBufferIn[iBuffer+3];
+         // Seems directly using SMB Buffer, the flash will has some wierd function
+         MainRegister[SET_SENSOR6 + iBuffer] = SmbBufferIn[iBuffer+3];
       }
 
-      SaveCalibrationToFlash(writeLocation << 4, (U8 xdata *)(&MainRegister[SET_SENSOR6]), packetLength);
+      
+      SaveCalibrationToFlash(writeLocation, packetLength);
+      
       ResetMcu();
       break;
 
@@ -597,23 +583,6 @@ void SMBus_ISR (void) interrupt 7
   SI = 0;                             // Clear SMBus interrupt flag
 }
 
-U32 processBaseline(U16 baseline, U16 tempScaling, U16 C_result)
-{
-  U32 toReturn;;
-
-  toReturn = (tempScaling << 8)/100 + C_result;
-
-  if(toReturn > baseline )
-  {
-    toReturn = (((toReturn - baseline) * 100)/ tempScaling) - 0x0000FFFF;
-  }
-  else
-  {
-    toReturn = 0;
-  }
-
-  return toReturn;
-}
 
 //-----------------------------------------------------------------------------
 // CS0 Interrupt Service Routine (ISR)
@@ -623,94 +592,146 @@ U32 processBaseline(U16 baseline, U16 tempScaling, U16 C_result)
 //-----------------------------------------------------------------------------
 INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
 {
-  // Allows us channel-specific gains
-  UU16 baseline;
-  UU32 temp;
-  U16 tempScaling;
+  
+     UU16 baseline;
+     UU32 temp;
+     U16 tempScaling;
+  
+     // Only defined for Calibration Purpose 
+     UU16 calTemp1;
+     UU16 calTemp2;
+     UU16 calTempCal;
 
-  #ifdef CALIBRATION
+     // Disable interrupts so we don't deal with IO while we're
+     // processing the new data
+     EA = 0;
 
-  UU16 calTemp;
+     PinDigitalOut = 1;  //Set pin on
 
-  #endif
+      // After calibration all the Gain setting shouldn't be detected
+      if(!IsCalibrated)
+      {
+         temp.U32 = CS0D; 
+         if(!IsSensorSizeDetected)
+         {
+            if(MainRegister[SET_REFERENCEGAIN] < 2)
+            {
+               MainRegister[SET_REFERENCEGAIN] = temp.U32 > 0x8000 ? 0x01 : 0x05;
+               CS0MD1 = 0x00 | (MainRegister[SET_REFERENCEGAIN] & 0x07);
+            } 
 
-  // Disable interrupts so we don't deal with IO while we're
-  // processing the new data
-  EA = 0;
+            else
+            {
+               MainRegister[SET_REFERENCEGAIN] = temp.U32 > 0xFEEE ? 0x01 : 0x05;
+               CS0MD1 = 0x00 | (MainRegister[SET_REFERENCEGAIN] & 0x07);
+            }
+         
+            IsSensorSizeDetected = 1;
+         }
+      }
 
-  PinDigitalOut = 1;  //Set pin on
+      // Baseline Tare code
+      if(!IsBaselineSettled)
+      {
+      
+         temp.U32 = CS0D; 
+      
+         MainRegister[SET_BASELINE0] = temp.U8[2];
+         MainRegister[SET_BASELINE0b] = temp.U8[3];
+         IsBaselineSettled = 1;
+      
+      }
 
-  // Initial the baseline at the first conversion
+     temp.U32 = MainRegister[SET_BASELINE0+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
+     baseline.U16 = (temp.U32 <<8) + MainRegister[SET_BASELINE0b+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
+     tempScaling = (MainRegister[SET_SCALINGANALOGUEOUTMSB]<<8) + MainRegister[SET_SCALINGANALOGUEOUTLSB];
 
-  if(!IsBaselineSettled)
-  {
-    baseline.U16 = 0;
-    tempScaling = 100;
+     tempScaling = (tempScaling < 1 ? 1: tempScaling); //We don't want a divide by zero error
 
-    temp.U32 = processBaseline(baseline.U16, 100, CS0D);
+     SensorRawBuffer[0] = FrameCounter.U8[0];
+     SensorRawBuffer[1] = FrameCounter.U8[1];
+     SensorRawBuffer[2] = PCA0L;
+     SensorRawBuffer[3] = PCA0H;
 
-    MainRegister[SET_BASELINE0] = temp.U8[2];
-    MainRegister[SET_BASELINE0b] = temp.U8[3];
+     temp.U32 = tempScaling;
+     temp.U32 = (temp.U32 << 8)/100; //(Add 255)
+     temp.U32 += CS0D;
 
-    IsBaselineSettled = 1;
-  }
+      if(temp.U32 > (baseline.U16 ))
+      {
+      
+         temp.U32 -= baseline.U16;
+         temp.U32 = (temp.U32 *100)/ tempScaling;
 
-  temp.U32 = MainRegister[SET_BASELINE0+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
-  baseline.U16 = (temp.U32 <<8) + MainRegister[SET_BASELINE0b+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
-  tempScaling = (MainRegister[SET_SCALINGANALOGUEOUTMSB]<<8) + MainRegister[SET_SCALINGANALOGUEOUTLSB];
+         #ifdef CALIBRATION
+         // Calibration Calculation
+         calTemp1.U8[0] = temp.U8[2];
+         calTemp1.U8[1] = temp.U8[3];
 
-  tempScaling = (tempScaling < 1 ? 1: tempScaling); //We don't want a divide by zero error
 
-  SensorRawBuffer[0] = FrameCounter.U8[0];
-  SensorRawBuffer[1] = FrameCounter.U8[1];
-  SensorRawBuffer[2] = PCA0L;
-  SensorRawBuffer[3] = PCA0H;
+         if(IsCalibrated){
 
-  temp.U32 = processBaseline(baseline.U16, tempScaling, CS0D);
+            calTemp1.U8[0] = temp.U8[2];
+            calTemp1.U8[1] = temp.U8[3];
 
-  #ifdef CALIBRATION
+            calTempCal.U16 = calTemp1.U16 >> 2;
+            calTempCal.U16 = calTempCal.U16 << 1;
 
-  calTemp.U8[0] = temp.U8[2];
-  calTemp.U8[1] = temp.U8[3];
+            calTemp1.U8[0] = CalInfo1[calTempCal.U16];
+            calTemp1.U8[1] = CalInfo1[calTempCal.U16+1];
 
-  if(calTemp.U16 >= 0x3FF) //Cap if it is too large
-  {
-    calTemp.U16 = 0;
-  }
+            calTemp2.U8[0] = CalInfo1[calTempCal.U16+2];
+            calTemp2.U8[1] = CalInfo1[calTempCal.U16+3];
 
-  if(calTemp.U16 <= 0) //Minimum is zero
-  {
-    calTemp.U16 = 0;
-  }
+            calTemp2.U16 = calTemp2.U16 - calTemp1.U16;
+            calTemp2.U16 = (calTemp2.U16 * (temp.U8[2] & 0x03)) >> 2;
+            calTemp1.U16 = calTemp2.U16 + calTemp1.U16;
 
-  calTemp.U16 = CalInfo1[calTemp.U16] << 8 + CalInfo1[calTemp.U16+1];
-  calTemp.U16 = CalInfo1[calTemp.U16+2] << 8 + CalInfo1[calTemp.U16+3] - calTemp.U16;
-  calTemp.U16 = (calTemp.U16 * (calTemp.U8[0] & 0x03)) >> 2;
-  calTemp.U16 = CalInfo1[calTemp.U16] << 8 + CalInfo1[calTemp.U16+1] + calTemp.U16;
+            if(calTemp1.U16 >= 0x3FF) //Cap if it is too large 
+               calTemp1.U16 = 0x3FF;
 
-  SensorRawBuffer[ChannelIndex*2 + 4] = calTemp.U8[0]; //Big endian
-  SensorRawBuffer[ChannelIndex*2 + 5] = calTemp.U8[1];
+            if(calTemp1.U16 <= 0) //Minimum is zero
+               calTemp1.U16 = 0;
 
-  #else
+            SensorRawBuffer[ChannelIndex*2 + 4] = calTemp1.U8[0]; //Big endian
+            SensorRawBuffer[ChannelIndex*2 + 5] = calTemp1.U8[1];
+      
+         } 
+   
+         else {
+            SensorRawBuffer[ChannelIndex*2 + 4] = temp.U8[2]; //Big endian
+            SensorRawBuffer[ChannelIndex*2 + 5] = temp.U8[3];
+         }
+  
 
-  SensorRawBuffer[ChannelIndex*2 + 4] = temp.U8[2]; //Big endian
-  SensorRawBuffer[ChannelIndex*2 + 5] = temp.U8[3];
+         #else
 
-  #endif
+         SensorRawBuffer[ChannelIndex*2 + 4] = temp.U8[2]; //Big endian
+         SensorRawBuffer[ChannelIndex*2 + 5] = temp.U8[3];
 
-  ChannelIndex++;
+         #endif
 
-  if (ChannelIndex >= MainRegister[SET_NUMBERELEMENTS])
-  {
-    FrameCounter.U16 ++;
-    ChannelIndex = 0;
-    IsScanReady = 1;
-  }
+     }
 
-  CapSenseClearInt();
+     else
+     {
+         SensorRawBuffer[ChannelIndex*2 + 4] = 0x00; //Just send 0x00 to signify that we are out of range
+         SensorRawBuffer[ChannelIndex*2 + 5] = 0x00;
+     }
 
-  EA = 1;
-  PinDigitalOut = 0;  //Set pin off
+     ChannelIndex++;
+
+     if (ChannelIndex >= MainRegister[SET_NUMBERELEMENTS])
+     {
+       FrameCounter.U16 ++;
+       ChannelIndex = 0;
+       IsScanReady = 1;
+     }
+
+     CapSenseClearInt();
+
+     EA = 1;
+     PinDigitalOut = 0;  //Set pin off
 }
 
 //-----------------------------------------------------------------------------
