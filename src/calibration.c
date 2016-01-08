@@ -9,8 +9,9 @@
 #include "F700_FlashUtils.h"
 #include "main.h"
 
-U8 code CalFlashCheck[3] _at_ FLASH_ADDR_CAL_CHECK;  //Just a check that the flash has been programmed
+
 U8 code CalInfo1[SENSOR_CALIBRATION_DATA_LENGTH+1] _at_ FLASH_ADDR_CAL1;
+U8 code CalFlashCheck[3] _at_ FLASH_ADDR_CAL_CHECK;  //Just a check that the flash has been programmed
 
 void SaveCalibrationToFlash(U16 add_off, U8 packet_length)
 {

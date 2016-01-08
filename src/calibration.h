@@ -16,7 +16,7 @@
 #define TRUE 1
 #define FALSE 0
 
-#define SENSOR_CALIBRATION_DATA_LENGTH 512
+#define SENSOR_CALIBRATION_DATA_LENGTH 256
 
 
 #define FLASH_ADDR_CAL_CHECK      0x2000
@@ -24,11 +24,11 @@
 
 
 extern void SaveCalibrationToFlash(U16 add_off, U8 packet_length);
-extern bit CheckCalFlash();
+extern bit CheckCalFlash(void);
 extern void CalCalibrationTable(void);
 
-//extern code U8* CalInfo1;
 extern U8 code CalInfo1[SENSOR_CALIBRATION_DATA_LENGTH+1];
+extern U8 code CalFlashCheck[3];
 
 #endif /* CALIBRATION_H */
 

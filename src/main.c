@@ -33,6 +33,8 @@ const U8 CHANNEL_LIST[] = {16,17,18,19,20,21,22,23,36,37}; //Conversion to encod
 U8 code FlashCheck[3] _at_ FLASH_CHECK_ADDRESS;  //Just a check that the flash has been programmed
 U8 code SetupInfo[N_SETTINGS+1] _at_ FLASH_ADDR_SETUP;  //Our flash data
 
+
+
 // Global holder for SMBus data.
 // All receive data is written here
 // NUM_BYTES_WR used because an SMBus write is Master->Slave
@@ -64,9 +66,6 @@ void PerformDACFunction();
 #define CapSenseEnable()      (CS0CN |= 0x80)
 #define CapSenseDisable()     (CS0CN &= ~0x80)
 #define ResetMcu()			      (RSTSRC |= 0x10);
-
-#define Max(a, b) (a > b ? a : b)
-#define Min(a, b) (a < b ? a : b)
 
 //Chip select for analogue output
 sbit PinAnalogCS = P2^1;
@@ -154,7 +153,7 @@ void main (void)
 
   CapSense_Init();
 
-  //#ifdef CALIBRATION
+  #ifdef CALIBRATION
   if ( CheckCalFlash() ) //Sensor has been calibrated
   {
     // We have the calibration table stored, and prevent potential writing to flash
@@ -166,7 +165,7 @@ void main (void)
       IsCalibrated = 0;
   }
   
-  //#endif
+  #endif
 
   IsBaselineSettled = 0;
   IsStartup = 0;
@@ -228,7 +227,7 @@ void main (void)
           {
             MainRegister[SENSOR_DATA_LOCATION+i] = SensorRawBuffer[i];
           }
-
+           
           for (i = 0, n = MainRegister[SET_NUMBERELEMENTS]; i < n; ++i)
           {
             UU32 newValue;
@@ -251,6 +250,8 @@ void main (void)
             
           }
 
+          
+          
           PerformDACFunction();
 
           IsScanReady = 0;
@@ -264,6 +265,7 @@ void main (void)
     }
   } // End of main processing loop
 }
+
 
 //-----------------------------------------------------------------------------
 // PerformDACFunction
@@ -633,9 +635,7 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
       // Baseline Tare code
       if(!IsBaselineSettled)
       {
-      
          temp.U32 = CS0D; 
-      
          MainRegister[SET_BASELINE0] = temp.U8[2];
          MainRegister[SET_BASELINE0b] = temp.U8[3];
          IsBaselineSettled = 1;
@@ -665,8 +665,8 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
 
          #ifdef CALIBRATION
          // Calibration Calculation
-         calTemp1.U8[0] = temp.U8[2];
-         calTemp1.U8[1] = temp.U8[3];
+         //calTemp1.U8[0] = temp.U8[2];
+         //calTemp1.U8[1] = temp.U8[3];
 
 
          if(IsCalibrated){
@@ -674,7 +674,7 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
             calTemp1.U8[0] = temp.U8[2];
             calTemp1.U8[1] = temp.U8[3];
 
-            calTempCal.U16 = calTemp1.U16 >> 2;
+            calTempCal.U16 = calTemp1.U16 >> 3;
             calTempCal.U16 = calTempCal.U16 << 1;
 
             calTemp1.U8[0] = CalInfo1[calTempCal.U16];
@@ -684,7 +684,7 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
             calTemp2.U8[1] = CalInfo1[calTempCal.U16+3];
 
             calTemp2.U16 = calTemp2.U16 - calTemp1.U16;
-            calTemp2.U16 = (calTemp2.U16 * (temp.U8[2] & 0x03)) >> 2;
+            calTemp2.U16 = (calTemp2.U16 * (temp.U8[2] & 0x07)) >> 3;
             calTemp1.U16 = calTemp2.U16 + calTemp1.U16;
 
             if(calTemp1.U16 >= 0x3FF) //Cap if it is too large 
@@ -808,4 +808,3 @@ void SaveFlash(void)
     N_SETTINGS
   );
 }
-
