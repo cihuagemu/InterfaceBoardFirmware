@@ -5,7 +5,6 @@
 //  distributed except according to those terms.
 //-----------------------------------------------------------------------------
 
-//#define CALIBRATION
 
 #include "compiler_defs.h"
 #include "C8051F700_defs.h"
@@ -13,7 +12,7 @@
 #include "main.h"
 #include "F700_FlashUtils.h"
 #include "MCP4811.h"
-#include "calibration.h"
+//#include "calibration.h"
 
 U8 SmbAddress;
 volatile U8 SmbState = SMB_IDLE;
