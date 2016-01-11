@@ -5,6 +5,7 @@
 //  distributed except according to those terms.
 //-----------------------------------------------------------------------------
 
+//#define CALIBRATION
 
 #include "compiler_defs.h"
 #include "C8051F700_defs.h"
@@ -57,7 +58,7 @@ bit LoadFlash();
 void SaveFlash();
 void SetUpCapSense();
 void PerformDACFunction();
-
+void initRegisterSetting();
 
 // CapSense Controls
 #define CapSenseStart()       (CS0CN |= 0x10)
@@ -128,26 +129,8 @@ void main (void)
         SensorRawBuffer[i] = 0;//Initialise sensor buffer
       }
     }
-
-    MainRegister[SET_SMBUSADDRESS] = 0x04; //Default
-    SmbAddress = (MainRegister[SET_SMBUSADDRESS] << 1);
-
-    MainRegister[SET_SERIALNUMBERMSB] = SERIAL_NUM_DEF >> 8;
-    MainRegister[SET_SERIALNUMBERLSB] = SERIAL_NUM_DEF & 0xFF;
-
-    MainRegister[SET_NUMBERELEMENTS] = 1;
-    MainRegister[SET_SCALINGANALOGUEOUTMSB] = 0x01;
-    MainRegister[SET_SCALINGANALOGUEOUTLSB] = 0x2C;
-
-    //Capacitor Sensing Settings - Refer to CY8051F70x datasheet, chapter 15 for details
-    MainRegister[SET_REFERENCEGAIN] = 1;
-    MainRegister[SET_DISCHARGETIME] = 3;
-    MainRegister[SET_ACCUMULATOR] = 5; //32x
-
-    MainRegister[SET_SETTINGSPARAMCOUNT] = 0xFF;
-    MainRegister[SET_LENGTHSCANLIST] = 0xFF;
-    MainRegister[SET_MAX_NUM_SENSORS] = 0xFF;
-    MainRegister[N_SETTINGS] = 0xFF;
+    
+    initRegisterSetting();
   }
 
   CapSense_Init();
@@ -166,8 +149,6 @@ void main (void)
   
   #endif
 
-  IsBaselineSettled = 0;
-  IsStartup = 0;
 
   // Enable the SMBus interrupt
   EIE1 |= 0x01;
@@ -230,16 +211,11 @@ void main (void)
           for (i = 0, n = MainRegister[SET_NUMBERELEMENTS]; i < n; ++i)
           {
             UU32 newValue;
-            U32 oldValue = 0;
-            //U32 a, b, c;
-
-            newValue.U32 = (SensorRawBuffer[2*i+4]<<8) + SensorRawBuffer[2*i+5];
-            newValue.U32 = newValue.U32 * 50;
-
-            oldValue = (MainRegister[SENSOR_DATA_LOCATION+i+4]<<8) + MainRegister[SENSOR_DATA_LOCATION+i+5];
-            oldValue = oldValue * 50;
-
-            newValue.U32 = (newValue.U32 + oldValue) /100;
+            
+            newValue.U32 = ((SensorRawBuffer[2*i+4]<<8) + SensorRawBuffer[2*i+5]) * 50;
+            newValue.U32 = ((MainRegister[SENSOR_DATA_LOCATION+i+4]<<8) + MainRegister[SENSOR_DATA_LOCATION+i+5]) * 50 + newValue.U32;
+            newValue.U32 = newValue.U32 / 100;
+            
             MainRegister[SENSOR_DATA_LOCATION+i+4] = newValue.U8[2];
             MainRegister[SENSOR_DATA_LOCATION+i+5] = newValue.U8[3];
 
@@ -249,8 +225,6 @@ void main (void)
             
           }
 
-          
-          
           PerformDACFunction();
 
           IsScanReady = 0;
@@ -313,14 +287,12 @@ void PerformDACFunction()
   PinAnalogCS = 1; //CS high
 
   // Wait 100 convertions and we tare our baseline after we startup
-   if(!IsStartup && MainRegister[SET_BASELINE23] > 100)
+   if(!IsStartup && MainRegister[SET_BASELINE23]++ > 100)
    {
       IsBaselineSettled = 0;
       IsStartup = 1;
-   } else
-   {
-      MainRegister[SET_BASELINE23]++;
-   }
+   } 
+   
 
 }
 
@@ -599,9 +571,17 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
      U16 tempScaling;
   
      // Only defined for Calibration Purpose 
-     UU16 calTemp1;
-     UU16 calTemp2;
-     UU16 calTempCal;
+     #ifdef CALIBRATION
+        UU16 calTemp1;
+        UU16 calTemp2;
+        UU16 calTempCal;
+         
+        if(!IsCalibrated)
+        {
+            IsSensorSizeDetected = 1;
+        }
+	  
+	  #endif
 
      // Disable interrupts so we don't deal with IO while we're
      // processing the new data
@@ -610,25 +590,19 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
      PinDigitalOut = 1;  //Set pin on
 
       // After calibration all the Gain setting shouldn't be detected
-      if(!IsCalibrated)
+      if(!IsSensorSizeDetected)
       {
-         temp.U32 = CS0D; 
-         if(!IsSensorSizeDetected)
+         if(MainRegister[SET_REFERENCEGAIN] < 2)
          {
-            if(MainRegister[SET_REFERENCEGAIN] < 2)
-            {
-               MainRegister[SET_REFERENCEGAIN] = temp.U32 > 0x8000 ? 0x01 : 0x05;
-               CS0MD1 = 0x00 | (MainRegister[SET_REFERENCEGAIN] & 0x07);
-            } 
+            MainRegister[SET_REFERENCEGAIN] = CS0D > 0x8000 ? 0x01 : 0x05;
+         } 
 
-            else
-            {
-               MainRegister[SET_REFERENCEGAIN] = temp.U32 > 0xFEEE ? 0x01 : 0x05;
-               CS0MD1 = 0x00 | (MainRegister[SET_REFERENCEGAIN] & 0x07);
-            }
-         
-            IsSensorSizeDetected = 1;
+         else
+         {
+            MainRegister[SET_REFERENCEGAIN] = CS0D > 0xFEEE ? 0x01 : 0x05;
          }
+         CS0MD1 = 0x00 | (MainRegister[SET_REFERENCEGAIN] & 0x07);
+         IsSensorSizeDetected = 1;
       }
 
       // Baseline Tare code
@@ -642,7 +616,7 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
       }
 
      temp.U32 = MainRegister[SET_BASELINE0+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
-     baseline.U16 = (temp.U32 <<8) + MainRegister[SET_BASELINE0b+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
+     baseline.U16 = (temp.U32 << 8) + MainRegister[SET_BASELINE0b+MainRegister[SET_SCANLIST0+ChannelIndex]*2];
      tempScaling = (MainRegister[SET_SCALINGANALOGUEOUTMSB]<<8) + MainRegister[SET_SCALINGANALOGUEOUTLSB];
 
      tempScaling = (tempScaling < 1 ? 1: tempScaling); //We don't want a divide by zero error
@@ -653,21 +627,17 @@ INTERRUPT(CapSense_Isr, INTERRUPT_CS0_EOC)
      SensorRawBuffer[3] = PCA0H;
 
      temp.U32 = tempScaling;
-     temp.U32 = (temp.U32 << 8)/100; //(Add 255)
-     temp.U32 += CS0D;
+     temp.U32 = (temp.U32 << 8) / 100 + CS0D; //(Add 255)
 
       if(temp.U32 > (baseline.U16 ))
       {
       
-         temp.U32 -= baseline.U16;
-         temp.U32 = (temp.U32 *100)/ tempScaling;
+         //temp.U32 -= baseline.U16;
+         temp.U32 = ((temp.U32 - baseline.U16) *100)/ tempScaling;
 
          #ifdef CALIBRATION
          // Calibration Calculation
-         //calTemp1.U8[0] = temp.U8[2];
-         //calTemp1.U8[1] = temp.U8[3];
-
-
+         
          if(IsCalibrated){
 
             calTemp1.U8[0] = temp.U8[2];
@@ -743,10 +713,10 @@ void SetUpCapSense()
 {
   U8 channel = MainRegister[SET_SCANLIST0+ChannelIndex];
 
-  if(channel >9)
-  {
-    channel = 9; //Max 10 channels
-  }
+  //if(channel >9)
+  //{
+    //channel = 9; //Max 10 channels
+  //}
 
   CS0MX = CHANNEL_LIST[channel];
   CapSenseStart();
@@ -760,9 +730,7 @@ void SetUpCapSense()
 //-----------------------------------------------------------------------------
 bit LoadFlash(void)
 {
-  U8 i, index;
-
-  index = 0;
+  U8 i;
 
   if(FlashCheck[0] == 0xFF && FlashCheck[1] == 0xFE && FlashCheck[2] == 0xFD)
   {
@@ -806,4 +774,33 @@ void SaveFlash(void)
     (U8 xdata *)(&MainRegister[0]),
     N_SETTINGS
   );
+}
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+//
+// Initialize settings to Main Register
+//-----------------------------------------------------------------------------
+void initRegisterSetting()
+{
+	MainRegister[SET_SMBUSADDRESS] = 0x04; //Default
+    SmbAddress = (MainRegister[SET_SMBUSADDRESS] << 1);
+
+    MainRegister[SET_SERIALNUMBERMSB] = SERIAL_NUM_DEF >> 8;
+    MainRegister[SET_SERIALNUMBERLSB] = SERIAL_NUM_DEF & 0xFF;
+
+    MainRegister[SET_NUMBERELEMENTS] = 1;
+    MainRegister[SET_SCALINGANALOGUEOUTMSB] = 0x01;
+    MainRegister[SET_SCALINGANALOGUEOUTLSB] = 0x2C;
+
+    //Capacitor Sensing Settings - Refer to CY8051F70x datasheet, chapter 15 for details
+    MainRegister[SET_REFERENCEGAIN] = 1;
+    MainRegister[SET_DISCHARGETIME] = 3;
+    MainRegister[SET_ACCUMULATOR] = 5; //32x
+
+    MainRegister[SET_SETTINGSPARAMCOUNT] = 0xFF;
+    MainRegister[SET_LENGTHSCANLIST] = 0xFF;
+    MainRegister[SET_MAX_NUM_SENSORS] = 0xFF;
+    MainRegister[N_SETTINGS] = 0xFF;
 }
