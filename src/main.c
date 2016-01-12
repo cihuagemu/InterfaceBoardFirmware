@@ -99,7 +99,7 @@ void main (void)
       // Oops. FLASH error. Life is bad.
       while (1)
       {
-        i = 0;
+       
       }
     }
   }
